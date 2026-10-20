@@ -16,12 +16,14 @@
 
 ## 2. Linux 首次部署
 
+代理部署在 `/mnt/data/zht/qwen-collector-proxy`，Conda 环境与采集数据分别放在其 `.conda-env` 和 `data/`；模型权重目录仍为 `/mnt/data/models/Qwen3.8-27B`。
+
 将新版 `qwen-collector-proxy-v2.tar.gz` 上传到服务器，然后执行：
 
 ```bash
-mkdir -p "/mnt/data"
-tar -xzf qwen-collector-proxy-v2.tar.gz -C "/mnt/data"
-cd "/mnt/data/qwen-collector-proxy"
+mkdir -p "/mnt/data/zht"
+tar -xzf qwen-collector-proxy-v2.tar.gz -C "/mnt/data/zht"
+cd "/mnt/data/zht/qwen-collector-proxy"
 
 conda create -p "$PWD/.conda-env" python=3.12 -y
 conda activate "$PWD/.conda-env"
@@ -54,7 +56,8 @@ store：true（使用 previous_response_id 时）
 ```bash
 conda activate qwen38
 VLLM_ENABLE_RESPONSES_API_STORE=1 CUDA_VISIBLE_DEVICES=0,1 \
-vllm serve Qwen/Qwen3.8-27B \
+vllm serve /mnt/data/models/Qwen3.8-27B \
+  --served-model-name Qwen/Qwen3.8-27B \
   --tensor-parallel-size 2 \
   --dtype bfloat16 \
   --max-model-len 32768 \
@@ -67,6 +70,8 @@ vllm serve Qwen/Qwen3.8-27B \
 ```
 
 `VLLM_ENABLE_RESPONSES_API_STORE=1` 设置在 **vLLM 进程**，不是代理进程。请求应使用 `store:true`，并从第一轮开始经过采集代理。先用下面的检查脚本确认你安装的 vLLM 版本与 Qwen 工具解析器确实能完成两轮原生 Responses 工具调用。
+
+这里从 `/mnt/data/models/Qwen3.8-27B` 加载本地模型，并用 `--served-model-name Qwen/Qwen3.8-27B` 保持请求中的模型名称一致。
 
 vLLM 官方说明该存储默认关闭，开启后把 input/output 保存在进程内存里，重启丢失且可能持续增长。代理的磁盘索引可以跨代理重启恢复采集历史，但不会替上游恢复已经丢失的 response 状态，也不会重写请求去绕开上游错误。批量生成时应监控 vLLM 主机内存，重启模型服务后从新会话开始。见 [vLLM 环境变量说明](https://docs.vllm.ai/en/latest/configuration/env_vars/)。
 
@@ -179,8 +184,8 @@ python collector_proxy.py export --data-dir ./data \
 
 ```bash
 systemctl --user stop qwen-collector
-tar -xzf qwen-collector-proxy-v2.tar.gz -C "/mnt/data"
-cd "/mnt/data/qwen-collector-proxy"
+tar -xzf qwen-collector-proxy-v2.tar.gz -C "/mnt/data/zht"
+cd "/mnt/data/zht/qwen-collector-proxy"
 conda activate "$PWD/.conda-env"
 python -m pip install -r requirements.txt
 systemctl --user restart qwen-collector

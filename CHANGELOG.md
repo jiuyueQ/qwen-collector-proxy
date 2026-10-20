@@ -8,5 +8,5 @@
 - 同时自动生成通用 SFT 和完整原生 Responses JSONL；导出支持原生格式、去重及后补祖先恢复。
 - 顶层 instructions 采用每轮独立语义；对无法解析的服务器历史不猜测、不标为完整样本。
 - 新增真实两轮工具调用检查脚本与 Linux Responses 部署指南。
-- 部署目录统一为 `/mnt/data/qwen-collector-proxy`，同步 Conda、数据目录和 systemd 用户服务。
+- 部署目录统一为 `/mnt/data/zht/qwen-collector-proxy`，同步 Conda、数据目录和 systemd 用户服务。
 - 测试从 19 项扩展到 38 项。

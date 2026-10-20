@@ -36,6 +36,15 @@
 
 ## 2. 推荐部署拓扑
 
+本项目部署根目录为 `/mnt/data/zht`，模型权重仍使用 `/mnt/data/models/Qwen3.8-27B`：
+
+| 内容 | 服务器路径 |
+|---|---|
+| 代理项目 | `/mnt/data/zht/qwen-collector-proxy` |
+| 代理 Conda 环境 | `/mnt/data/zht/qwen-collector-proxy/.conda-env` |
+| 原始记录、数据集、历史索引 | `/mnt/data/zht/qwen-collector-proxy/data` |
+| 模型权重 | `/mnt/data/models/Qwen3.8-27B` |
+
 先把 vLLM 和代理部署在同一 Linux 主机：vLLM 监听 `127.0.0.1:8000`，代理监听 `127.0.0.1:9000`。代理使用 CPU 和磁盘，不额外加载模型，不占用 L20 显存。
 
 框架在别的主机时，将代理改为 `0.0.0.0:9000`，设置 `PROXY_API_KEY`，让框架配置相同的 key。只开放代理端口给框架所在网络。若框架通过 Docker 运行，容器中的 `127.0.0.1` 是容器本身，base_url 应填写容器可达的代理地址。
@@ -45,10 +54,10 @@
 将压缩包上传到服务器，解压到固定目录。tar.gz 和 zip 二选一：
 
 ```bash
-mkdir -p "/mnt/data"
-tar -xzf qwen-collector-proxy-v2.tar.gz -C "/mnt/data"
-# 或：unzip qwen-collector-proxy-v2.zip -d "/mnt/data"
-cd "/mnt/data/qwen-collector-proxy"
+mkdir -p "/mnt/data/zht"
+tar -xzf qwen-collector-proxy-v2.tar.gz -C "/mnt/data/zht"
+# 或：unzip qwen-collector-proxy-v2.zip -d "/mnt/data/zht"
+cd "/mnt/data/zht/qwen-collector-proxy"
 
 conda create -p "$PWD/.conda-env" python=3.12 -y
 conda activate "$PWD/.conda-env"
@@ -67,7 +76,8 @@ chmod 600 collector.env
 
 ```bash
 conda activate qwen38
-VLLM_ENABLE_RESPONSES_API_STORE=1 CUDA_VISIBLE_DEVICES=0,1 vllm serve Qwen/Qwen3.8-27B \
+VLLM_ENABLE_RESPONSES_API_STORE=1 CUDA_VISIBLE_DEVICES=0,1 vllm serve /mnt/data/models/Qwen3.8-27B \
+  --served-model-name Qwen/Qwen3.8-27B \
   --tensor-parallel-size 2 \
   --dtype bfloat16 \
   --max-model-len 32768 \
@@ -81,12 +91,14 @@ VLLM_ENABLE_RESPONSES_API_STORE=1 CUDA_VISIBLE_DEVICES=0,1 vllm serve Qwen/Qwen3
 
 模型服务本身需要兼容版本的 vLLM、Transformers、NVIDIA 驱动。以已启动成功的模型服务为准；本代理不替换、安装或修改模型运行环境。数字员工系统提示词与工具 schema 也计入 32K 上下文预算。
 
+上面的 `vllm serve` 使用已下载的本地权重目录，`--served-model-name` 保持 API 模型名为 `Qwen/Qwen3.8-27B`，框架和检查脚本继续使用这个名称。
+
 如果使用 Responses 的 `previous_response_id`，上游需启用存储且创建请求使用 `store:true`。上面的环境变量用于 vLLM 的 Responses 存储。vLLM 官方说明该存储保存在进程内存中、重启丢失，长时间采集需关注内存增长；代理磁盘历史仍保留，但不会自动恢复上游服务器的会话状态。参见 [vLLM 环境变量](https://docs.vllm.ai/en/latest/configuration/env_vars/) 和 [RESPONSES.md](RESPONSES.md)。
 
 ## 5. 启动代理
 
 ```bash
-cd "/mnt/data/qwen-collector-proxy"
+cd "/mnt/data/zht/qwen-collector-proxy"
 bash start_proxy.sh
 ```
 
@@ -212,7 +224,7 @@ TRL 的 conversational prompt/completion 与 tools 格式参考：
 
 ## 9. systemd 常驻部署（用户服务）
 
-以下命令假设项目位于 `/mnt/data/qwen-collector-proxy`，环境位于该目录的 `.conda-env`，配置已写入 `collector.env`：
+以下命令假设项目位于 `/mnt/data/zht/qwen-collector-proxy`，环境位于该目录的 `.conda-env`，配置已写入 `collector.env`：
 
 ```bash
 mkdir -p "$HOME/.config/systemd/user"

@@ -1,13 +1,13 @@
 # User service. Install at ~/.config/systemd/user/qwen-collector.service
-# Expected checkout: /mnt/data/qwen-collector-proxy
+# Expected checkout: /mnt/data/zht/qwen-collector-proxy
 [Unit]
 Description=Qwen OpenAI-compatible dataset capture proxy
 After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/mnt/data/qwen-collector-proxy
-ExecStart=/bin/bash /mnt/data/qwen-collector-proxy/start_proxy.sh
+WorkingDirectory=/mnt/data/zht/qwen-collector-proxy
+ExecStart=/bin/bash /mnt/data/zht/qwen-collector-proxy/start_proxy.sh
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=60
