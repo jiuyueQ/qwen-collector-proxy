@@ -1,0 +1,10 @@
+# 验证记录
+
+- 开发机：Windows，Python 3.14.6；代理代码要求 Python >=3.10，部署方案使用 Linux + Conda Python 3.12。
+- 命令：`python -m pytest -q test_proxy.py test_responses.py`。
+- 结果：38 项测试通过。使用模拟上游，无需 GPU 或访问外部服务。
+- 测试覆盖：JSON 原文透传、逐字节 SSE/UTF-8 分片、并行函数参数重组、工具参数 schema 过滤、历史工具结果、截断/过滤回复、HTTP/SSE 错误、连接失败、断流、客户端断开、鉴权、模型探测、多 choice、20 并发写入、离线去重及推理字段恢复。
+- 流式测试让模拟上游等待下游接收首块之后再继续输出，以检查代理没有等待完整响应后才转发。
+- Responses 覆盖：普通与逐字节 SSE、文本/函数参数/摘要事件重组、原生 function schema 转换、三轮工具轨迹、顶层 instructions 替换、代理重启、分支隔离、缺失祖先晚到后的完整重导出、持久化索引重建、上游凭据隔离、后台 GET 完成观察、取消/删除转发、原生未知条目保留、循环检测及父终止事件转发前的历史索引发布。
+- 已检查 serve/export 和 smoke_responses.py 命令行参数入口。smoke_responses.py 是部署后真实模型检查脚本，本地未对真实模型执行。
+- 未在用户 Linux 服务器、真实 Qwen 27B、NVIDIA L20 或数字员工框架上执行。真实环境按 README 第 6 节做连通性和端到端检查。

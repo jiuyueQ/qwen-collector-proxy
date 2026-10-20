@@ -1,0 +1,22 @@
+{
+  "model": "Qwen/Qwen3.8-27B",
+  "input": "请调用 get_order_status 工具查询订单 A123 的状态。",
+  "instructions": "你是数字员工。调用工具获取订单状态，不要编造工具结果。",
+  "tools": [
+    {
+      "type": "function",
+      "name": "get_order_status",
+      "description": "根据订单编号查询订单状态",
+      "parameters": {
+        "type": "object",
+        "properties": {"order_id": {"type": "string"}},
+        "required": ["order_id"],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "tool_choice": {"type": "function", "name": "get_order_status"},
+  "store": true,
+  "stream": true,
+  "max_output_tokens": 4096
+}
