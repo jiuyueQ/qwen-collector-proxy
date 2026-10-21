@@ -18,5 +18,6 @@ logs/
 *.pid
 *.py[cod]
 *.jsonl
+!batch_questions.example.jsonl
 *.zip
 *.tar.gz

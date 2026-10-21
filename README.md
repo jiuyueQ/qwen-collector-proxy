@@ -1,10 +1,12 @@
-# Qwen 数字员工采集代理 v2.1：Linux 部署方案
+# Qwen 数字员工采集代理 v2.2：Linux 部署方案
 
 把代理放在数字员工框架与 vLLM 之间。数字员工继续执行工具；代理记录每次模型请求与回复，自动生成候选 SFT 数据。
 
 本版同时支持 Chat Completions 和 Responses。Responses 的完整部署、两轮工具调用检查、历史关联规则及旧版升级步骤见 [RESPONSES.md](RESPONSES.md)。
 
 新增 Qwen Chat 消息兼容：默认处理多个或中途出现的 `system/developer`，保留框架原始请求并另外保存实际转发请求。兼容规则、语义影响及服务器 nohup 更新重启命令见 [CHAT_COMPAT.md](CHAT_COMPAT.md)。
+
+新增 Wing 数字员工批量提问脚本：自动识别运行页的普通/AG-UI 接口，支持题目 JSONL、多轮题组、独立会话、断点续跑及平台流式记录。见 [BATCH_QUESTIONS.md](BATCH_QUESTIONS.md)。模型工具调用训练集仍由本采集代理导出。
 
 ```text
 批量提问脚本 -> 数字员工对话入口

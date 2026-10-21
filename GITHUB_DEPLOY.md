@@ -4,6 +4,8 @@
 
 代理项目：`/mnt/data/zht/qwen-collector-proxy`。模型目录保持 `/mnt/data/models/Qwen3.8-27B`，不需要移动模型。
 
+通过 Wing 数字员工运行页批量提问见 [BATCH_QUESTIONS.md](BATCH_QUESTIONS.md)，可在能够访问平台的 Linux 或 Windows 主机运行。
+
 ## HTTPS 拉取
 
 仓库已设为 Public 时，可直接执行以下命令；如果仓库仍为 Private，需要先配置 GitHub 身份，或使用后面的 SSH/CLI 方式：
