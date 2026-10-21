@@ -1,0 +1,61 @@
+{
+  "version": 2,
+  "banks": [
+    {
+      "id": "readonly",
+      "title": "只读查询与页面读取",
+      "description": "300 组查询/读取题，默认推荐；涉及的管理页面仍取决于实际工具能力。",
+      "file": "readonly.jsonl",
+      "count": 300,
+      "contains_writes": false
+    },
+    {
+      "id": "form_draft",
+      "title": "表单填写与暂不提交",
+      "description": "200 组测试表单题，检查填写、确认、取消与缺参；不含授权提交指令。",
+      "file": "form_draft.jsonl",
+      "count": 200,
+      "contains_writes": false
+    },
+    {
+      "id": "form_submit",
+      "title": "提交与保存（测试环境）",
+      "description": "200 组含真实保存/提交的题目；应连接演示数据环境，表单字段以实际工具为准。",
+      "file": "form_submit.jsonl",
+      "count": 200,
+      "contains_writes": true
+    },
+    {
+      "id": "dates",
+      "title": "日期格式与日期范围",
+      "description": "150 组日期题；使用固定日期便于复现，包含日期控件和不合理范围识别，不包含提交授权。",
+      "file": "dates.jsonl",
+      "count": 150,
+      "contains_writes": false
+    },
+    {
+      "id": "dialogue",
+      "title": "缺参、重复指令与异常边界",
+      "description": "100 组边界题；空结果不等于 success=false。真实工具失败才触发失败停止纪律。",
+      "file": "dialogue.jsonl",
+      "count": 100,
+      "contains_writes": false
+    },
+    {
+      "id": "web_search",
+      "title": "联网搜索补充",
+      "description": "50 组搜索题，供配置中实际存在联网搜索工具时采集。",
+      "file": "web_search.jsonl",
+      "count": 50,
+      "contains_writes": false
+    },
+    {
+      "id": "all_1000",
+      "title": "全部1000组（包含提交，测试环境）",
+      "file": "all_1000.jsonl",
+      "count": 1000,
+      "contains_writes": true,
+      "description": "1000 组任务，包含 200 组真实保存/提交题；应在业务测试环境运行。"
+    }
+  ]
+}

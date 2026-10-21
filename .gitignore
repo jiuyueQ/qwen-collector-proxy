@@ -1,5 +1,7 @@
 .conda-env/
 .venv/
+.batch-env/
+windows_batch.local.json
 __pycache__/
 .pytest_cache/
 collector.env
@@ -19,5 +21,6 @@ logs/
 *.py[cod]
 *.jsonl
 !batch_questions.example.jsonl
+!question_banks/*.jsonl
 *.zip
 *.tar.gz

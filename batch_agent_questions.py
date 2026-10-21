@@ -6,19 +6,21 @@ import argparse
 import asyncio
 import base64
 import codecs
+from contextlib import ExitStack
 import getpass
 import hashlib
 import json
 import os
 from pathlib import Path
 import sys
+import tempfile
 import time
 from typing import Any
 from urllib.parse import quote, urlsplit
 import uuid
 
 import httpx
-from filelock import FileLock
+from filelock import FileLock, Timeout as FileLockTimeout
 
 
 def now() -> str:
@@ -60,10 +62,22 @@ def load_questions(path: Path) -> list[dict]:
         if item_id in seen:
             raise ValueError(f"重复题目 ID: {item_id}")
         seen.add(item_id)
-        items.append({"id": item_id, "turns": turns})
+        metadata = item.get("metadata") or {}
+        if not isinstance(metadata, dict):
+            raise ValueError(f"第 {line_number} 行的 metadata 必须为对象")
+        items.append({"id": item_id, "turns": turns, "metadata": metadata})
     if not items:
         raise ValueError("题目文件为空")
     return items
+
+
+def is_oom(value: Any) -> bool:
+    text = encoded(value).lower()
+    return any(marker in text for marker in (
+        "cuda out of memory", "cuda error: out of memory", "outofmemoryerror",
+        "out of gpu memory", "not enough memory for kv", "no available memory for the cache blocks",
+        "显存不足", "显存溢出",
+    ))
 
 
 class SSE:
@@ -180,6 +194,8 @@ async def send_turn(args, client, auth, mode, agent_code, question, session_id, 
     result = {"status": "running", "started_at": now(), "question": question, "session_id": session_id,
               "run_id": run_id, "mode": mode, "content": "", "reasoning_content": "",
               "tool_events": [], "errors": [], "terminal_received": False, "business_verified": False}
+    result["tool_error_detected"] = False
+    result["oom_detected"] = False
     save(directory / "result.json", result)
     parser = SSE()
 
@@ -195,9 +211,21 @@ async def send_turn(args, client, auth, mode, agent_code, question, session_id, 
             result["reasoning_content"] += event.get("delta") or ""
         if kind == "tool_event" or (isinstance(kind, str) and kind.startswith("TOOL_CALL_")):
             result["tool_events"].append(event)
+            tool_result = event.get("result")
+            if isinstance(tool_result, str):
+                try:
+                    tool_result = json.loads(tool_result)
+                except ValueError:
+                    pass
+            if (event.get("status") in {"error", "failed", "failure"}
+                    or event.get("success") is False
+                    or (isinstance(tool_result, dict) and tool_result.get("success") is False)):
+                result["tool_error_detected"] = True
+                result["oom_detected"] = result["oom_detected"] or is_oom(event)
         if kind in {"error", "RUN_ERROR"}:
             result["errors"].append(event)
             result["terminal_received"] = True
+            result["oom_detected"] = result["oom_detected"] or is_oom(event)
         if kind == "done" and mode == "debug":
             result["terminal_received"] = True
             if event.get("finish_reason") in {"length", "content_filter"}:
@@ -214,9 +242,13 @@ async def send_turn(args, client, auth, mode, agent_code, question, session_id, 
             with (directory / "response.body").open("wb") as raw, \
                     (directory / "events.jsonl").open("w", encoding="utf-8", newline="\n") as events_file:
                 if not response.is_success:
+                    error_body = bytearray()
                     async for chunk in response.aiter_bytes():
                         raw.write(chunk)
                         raw.flush()
+                        if len(error_body) < 1024 * 1024:
+                            error_body.extend(chunk[:1024 * 1024 - len(error_body)])
+                    result["oom_detected"] = is_oom(error_body.decode("utf-8", errors="replace"))
                     response.raise_for_status()
                 if "text/event-stream" not in response.headers.get("content-type", "").lower():
                     async for chunk in response.aiter_bytes():
@@ -281,6 +313,7 @@ def rebuild_qa(root: Path) -> int:
                         "metadata": {"case_key": case["case_key"], "question_id": case["question_id"],
                             "session_id": case["session_id"], "mode": case["mode"],
                             "business_verified": False, "source": turn["source"],
+                            "question_metadata": case.get("question_metadata", {}),
                             "dataset_kind": "agent_final_qa_without_tool_trace"}}) + "\n")
                     conversation.extend([{"role": "user", "content": question},
                                          {"role": "assistant", "content": turn["content"]}])
@@ -295,19 +328,35 @@ def rebuild_qa(root: Path) -> int:
 
 async def run(args):
     questions = load_questions(Path(args.input))
+    for item in questions:
+        if len(item["turns"]) > args.max_turns:
+            raise ValueError(f"题目 {item['id']} 超过每组最多 {args.max_turns} 轮的限制")
+        if any(len(turn) > args.max_question_chars for turn in item["turns"]):
+            raise ValueError(f"题目 {item['id']} 超过单轮 {args.max_question_chars} 字符的限制")
     root = Path(args.output).resolve()
     root.mkdir(parents=True, exist_ok=True)
-    with FileLock(str(root / ".batch.lock"), timeout=0):
+    with FileLock(str(root / ".batch.lock"), timeout=0), ExitStack() as locks:
         try:
             async with httpx.AsyncClient(trust_env=False, follow_redirects=False,
                     timeout=httpx.Timeout(args.read_timeout, connect=15)) as client:
                 auth = Auth(args, client)
                 await auth.initialize()
                 await auth.refresh()
+                lock_root = Path(tempfile.gettempdir()) / "qwen-agent-batch-locks"
+                lock_root.mkdir(parents=True, exist_ok=True)
+                lock_key = hashlib.sha256(encoded([args.control_base, auth.tenant_id, args.agent_id]).encode()).hexdigest()
+                locks.enter_context(FileLock(str(lock_root / (lock_key + ".lock")), timeout=0))
                 response = await client.get(args.control_base + "/api/admin/agent-configs/" + quote(args.agent_id, safe=""),
                                             headers=auth.headers())
                 response.raise_for_status()
                 config = response.json()
+                if config.get("enable_memory") and not args.allow_agent_memory:
+                    raise ValueError("平台启用了记忆模块。严格隔离采集请先关闭该智能体的记忆模块并保存；"
+                                     "脚本不修改平台配置。若明确接受平台记忆行为，可显式使用 --allow-agent-memory。")
+                configured_output = config.get("max_completion_tokens")
+                if isinstance(configured_output, (int, float)) and configured_output > args.max_agent_output_tokens:
+                    raise ValueError(f"平台输出上限为 {configured_output} tokens，超过采集上限 {args.max_agent_output_tokens}；"
+                                     "请先在平台降低生成令牌数量并保存。")
                 mode = args.mode
                 if mode == "auto":
                     mode = "agui" if config.get("agui_enabled") and config.get("agent_code") else "debug"
@@ -315,12 +364,12 @@ async def run(args):
                 if mode == "agui" and not agent_code:
                     raise ValueError("AG-UI 模式需要配置中的 agent_code")
                 print(f"模式: {mode}; 题目数: {len(questions)}; 输出: {root}", flush=True)
-                processed = skipped = failed = 0
+                processed = skipped = failed = consecutive_failures = 0
                 for item in questions:
                     for repeat in range(args.repeat):
                         identity = {"control": args.control_base, "gateway": args.gateway_base,
                                     "agent": args.agent_id, "tenant": auth.tenant_id, "mode": mode,
-                                    "item": item, "repeat": repeat}
+                                    "item": {"id": item["id"], "turns": item["turns"]}, "repeat": repeat}
                         key = hashlib.sha256(encoded(identity).encode()).hexdigest()
                         case_dir = root / "cases" / key
                         case_file = case_dir / "case.json"
@@ -337,6 +386,7 @@ async def run(args):
                         case = {"case_key": key, "question_id": item["id"], "repeat": repeat + 1,
                                 "session_id": session_id, "attempt_id": attempt, "mode": mode,
                                 "agent_id": args.agent_id, "started_at": now(), "status": "running", "results": []}
+                        case["question_metadata"] = item["metadata"]
                         save(case_file, case)
                         print(f"[{processed}] {item['id']} 第{repeat + 1}次，会话 {session_id}", flush=True)
                         try:
@@ -350,6 +400,9 @@ async def run(args):
                                 save(case_file, case)
                                 if turn["status"] != "success":
                                     break
+                                if turn["tool_error_detected"] and index < len(item["turns"]):
+                                    case["status"] = "stopped_on_tool_error"
+                                    break
                             if len(case["results"]) == len(item["turns"]) and all(t["status"] == "success" for t in case["results"]):
                                 case["status"] = "success"
                         except BaseException as exc:
@@ -362,6 +415,19 @@ async def run(args):
                         print(f"  {case['status']}", flush=True)
                         if case["status"] != "success":
                             failed += 1
+                            consecutive_failures += 1
+                        else:
+                            consecutive_failures = 0
+                        if any(t.get("oom_detected") for t in case["results"]):
+                            print("检测到显存不足错误，已停止整批，不自动重试。", flush=True)
+                            return 2
+                        if (case["status"] in {"incomplete", "interrupted", "needs_action"}
+                                or any(t.get("http_status") in {429, 503} for t in case["results"])):
+                            print("任务未确认结束、需要人工处理或服务繁忙，已停止整批，避免叠加请求。", flush=True)
+                            return 2
+                        if consecutive_failures >= args.max_consecutive_failures:
+                            print("连续失败达到上限，已停止整批。", flush=True)
+                            return 2
                         await asyncio.sleep(args.interval)
                     if args.limit and processed >= args.limit:
                         break
@@ -388,9 +454,14 @@ def main():
     parser.add_argument("--username", default=os.getenv("WING_USERNAME", ""))
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--limit", type=int, default=0, help="本次最多发送多少组题，0 为不限")
-    parser.add_argument("--interval", type=float, default=1, help="每组题之间间隔秒数")
+    parser.add_argument("--interval", type=float, default=3, help="每组题之间间隔秒数，默认 3")
     parser.add_argument("--read-timeout", type=float, default=600)
     parser.add_argument("--task-timeout", type=float, default=1800, help="每轮总时间上限秒数")
+    parser.add_argument("--max-turns", type=int, default=3, help="每组最大用户轮数，默认 3")
+    parser.add_argument("--max-question-chars", type=int, default=4000, help="单轮用户问题字符上限")
+    parser.add_argument("--max-agent-output-tokens", type=int, default=4096, help="检查平台输出配置的上限，不改写平台请求")
+    parser.add_argument("--max-consecutive-failures", type=int, default=3)
+    parser.add_argument("--allow-agent-memory", action="store_true", help="显式允许平台记忆；默认要求关闭，避免跨题共享记忆")
     parser.add_argument("--retry-failed", action="store_true", help="显式重新提交未成功题组，可能重复执行工具")
     args = parser.parse_args()
     page = urlsplit(args.page_url)
@@ -409,11 +480,16 @@ def main():
             parser.error("control-base/gateway-base 必须为不带凭据、query 或 fragment 的 http(s) 地址")
     if args.repeat < 1 or args.limit < 0 or args.interval < 0 or args.read_timeout <= 0 or args.task_timeout <= 0:
         parser.error("repeat/超时必须大于 0，limit/interval 不能为负数")
+    if min(args.max_turns, args.max_question_chars, args.max_agent_output_tokens, args.max_consecutive_failures) <= 0:
+        parser.error("轮数、字符、输出令牌与连续失败上限必须大于 0")
     try:
         return asyncio.run(run(args))
     except KeyboardInterrupt:
         print("已中断；已收到的响应与断点保留。", file=sys.stderr)
         return 130
+    except FileLockTimeout:
+        print("已有批量任务占用该输出目录或本机的同一智能体，请先结束原任务。", file=sys.stderr)
+        return 2
     except ValueError as exc:
         print(f"参数或数据错误: {exc}", file=sys.stderr)
         return 2
