@@ -14,6 +14,8 @@ exports/
 *.sqlite3
 *.sqlite3-*
 *.log
+logs/
+*.pid
 *.py[cod]
 *.jsonl
 *.zip

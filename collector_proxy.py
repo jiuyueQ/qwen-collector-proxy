@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """OpenAI Chat Completions + Responses recording proxy. Python >=3.10.
 
-serve: transparent forwarding + raw capture + automatic candidate SFT export.
+serve: Qwen message compatibility + raw capture + automatic candidate SFT export.
 export: rebuild a dataset from completed captures, with optional deduplication.
 """
 from __future__ import annotations
@@ -30,6 +30,7 @@ from fastapi.responses import Response, StreamingResponse
 from filelock import FileLock
 from jsonschema.validators import validator_for
 from responses_support import ResponseHistory, build_response_exports
+from chat_compat import normalize_chat_request
 
 LOG = logging.getLogger("collector")
 
@@ -63,8 +64,11 @@ class Settings:
     read_timeout: float = 600.0
     max_request_bytes: int = 32 * 1024 * 1024
     include_reasoning: bool = False
+    chat_compat: str = "qwen"
 
     def __post_init__(self) -> None:
+        if self.chat_compat not in {"qwen", "off"}:
+            raise ValueError("chat_compat 必须是 qwen 或 off")
         self.upstream = self.upstream.rstrip("/")
         self.data_dir = Path(self.data_dir).resolve()
         url = httpx.URL(self.upstream)
@@ -378,6 +382,9 @@ def make_samples(request: dict[str, Any], record: dict[str, Any], *,
                 "parallel_tool_calls": request.get("parallel_tool_calls"),
                 "business_verified": False,
             }
+            if record.get("chat_compatibility"):
+                sample["metadata"]["chat_compatibility"] = copy.deepcopy(record["chat_compatibility"])
+                sample["metadata"]["request_source"] = record.get("forwarded_request_file", "request.json")
             samples.append(sample)
         except Exception as exc:
             # A malformed tool schema or argument excludes only this target.
@@ -392,9 +399,10 @@ class Capture:
                  history: ResponseHistory | None = None, operation: str = "chat", method: str = "POST", path: str = ""):
         self.settings = settings
         self.payload = payload
+        self.forwarded_body = body
         now = timestamp()
         self.record: dict[str, Any] = {
-            "schema_version": 2, "request_id": uuid.uuid4().hex,
+            "schema_version": 3, "request_id": uuid.uuid4().hex,
             "operation": operation, "method": method, "path": path,
             "history_scope": hashlib.sha256((settings.upstream + "\0" + settings.upstream_key).encode()).hexdigest(),
             "started_at": now, "state": "running", "upstream_status": None,
@@ -407,6 +415,20 @@ class Capture:
             request_file.write(body)
             request_file.flush()
             os.fsync(request_file.fileno())
+        if operation == "chat":
+            self.payload, audit = normalize_chat_request(payload, settings.chat_compat)
+            self.record["chat_compatibility"] = audit
+            if audit["changed"]:
+                self.forwarded_body = dump(self.payload).encode("utf-8")
+            with (self.directory / "forwarded_request.json").open("wb") as forwarded_file:
+                forwarded_file.write(self.forwarded_body)
+                forwarded_file.flush()
+                os.fsync(forwarded_file.fileno())
+            self.record["forwarded_request_file"] = "forwarded_request.json"
+            if audit["changed"]:
+                LOG.info("normalized chat request_id=%s changes=%d", self.record["request_id"], len(audit["changes"]))
+            elif audit.get("skip_reason"):
+                LOG.warning("chat compatibility skipped request_id=%s reason=%s", self.record["request_id"], audit["skip_reason"])
         atomic_json(self.directory / "record.json", self.record)
         self.handle = (self.directory / "response.body").open("wb")
         self.parser: SSECollector | None = None
@@ -616,7 +638,7 @@ def create_app(settings: Settings, transport: Any = None) -> FastAPI:
         try:
             upstream_request = app.state.client.build_request(
                 request.method, settings.upstream + suffix,
-                params=request.query_params, headers=upstream_headers(), content=raw_body,
+                params=request.query_params, headers=upstream_headers(), content=capture.forwarded_body,
             )
             response = await app.state.client.send(upstream_request, stream=True)
             capture.upstream = response
@@ -705,7 +727,14 @@ def export_dataset(args: argparse.Namespace) -> int:
                 counts["records"] += 1
                 try:
                     record = json.loads(record_path.read_text(encoding="utf-8"))
-                    body = record_path.with_name("request.json").read_bytes()
+                    # Reproduce the prompt that actually produced this target. Never
+                    # re-normalize old records with a newer compatibility policy.
+                    request_name = "request.json"
+                    if record.get("operation", "chat") == "chat" and record.get("forwarded_request_file"):
+                        if record["forwarded_request_file"] != "forwarded_request.json":
+                            raise ValueError("unknown_forwarded_request_file")
+                        request_name = "forwarded_request.json"
+                    body = record_path.with_name(request_name).read_bytes()
                     request = json.loads(body) if body else {}
                     if record.get("operation", "chat").startswith("responses."):
                         samples, native, reasons = build_response_exports(request, record, history,
@@ -757,6 +786,8 @@ def main() -> int:
     serve.add_argument("--read-timeout", type=float, default=600)
     serve.add_argument("--max-request-mb", type=int, default=32)
     serve.add_argument("--include-reasoning", action="store_true", help="自动导出也保留独立 reasoning 字段")
+    serve.add_argument("--chat-compat", choices=["qwen", "off"], default=os.getenv("CHAT_COMPAT_MODE", "qwen"),
+                       help="qwen: 合并开头指令，中途指令按原位置转用户上下文；off: 原样转发")
     export = commands.add_parser("export", help="从原始记录重新导出（默认去重）")
     export.add_argument("--data-dir", required=True)
     export.add_argument("--output", required=True)
@@ -775,6 +806,7 @@ def main() -> int:
         proxy_key=os.getenv("PROXY_API_KEY", ""), upstream_key=os.getenv("UPSTREAM_API_KEY", ""),
         read_timeout=args.read_timeout, max_request_bytes=args.max_request_mb * 1024 * 1024,
         include_reasoning=args.include_reasoning,
+        chat_compat=args.chat_compat,
     )
     if args.host not in ("127.0.0.1", "::1", "localhost") and not settings.proxy_key:
         parser.error("监听非本地地址时，请先设置环境变量 PROXY_API_KEY")

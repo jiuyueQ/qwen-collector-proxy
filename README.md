@@ -1,8 +1,10 @@
-# Qwen 数字员工采集代理 v2：Linux 部署方案
+# Qwen 数字员工采集代理 v2.1：Linux 部署方案
 
 把代理放在数字员工框架与 vLLM 之间。数字员工继续执行工具；代理记录每次模型请求与回复，自动生成候选 SFT 数据。
 
 本版同时支持 Chat Completions 和 Responses。Responses 的完整部署、两轮工具调用检查、历史关联规则及旧版升级步骤见 [RESPONSES.md](RESPONSES.md)。
+
+新增 Qwen Chat 消息兼容：默认处理多个或中途出现的 `system/developer`，保留框架原始请求并另外保存实际转发请求。兼容规则、语义影响及服务器 nohup 更新重启命令见 [CHAT_COMPAT.md](CHAT_COMPAT.md)。
 
 ```text
 批量提问脚本 -> 数字员工对话入口
@@ -21,7 +23,7 @@
 
 ## 1. 支持范围与数据含义
 
-- `POST /v1/chat/completions`：普通 JSON 与 SSE 流式回复；请求体原样转发，支持工具参数分片、并行工具调用和多个 choice。
+- `POST /v1/chat/completions`：普通 JSON 与 SSE 流式回复；默认进行 Qwen 消息角色兼容，`CHAT_COMPAT_MODE=off` 可原样转发。支持工具参数分片、并行工具调用和多个 choice。
 - `POST /v1/responses`：普通 JSON 与原生 Responses SSE，支持 function call 及 `previous_response_id` 的持久化历史关联。
 - `GET/DELETE /v1/responses/{response_id}`、`POST /v1/responses/{response_id}/cancel`：透传并保存生命周期记录；后台生成完成后通过 GET 观察到的完整结果也可关联原创建请求导出。
 - `GET /v1/models`：转发模型列表，兼容框架的模型探测。
@@ -169,6 +171,7 @@ data/
     2026-10-20/                 # UTC 日期
       <request_uuid>/
         request.json           # 框架原始请求体，字节保留
+        forwarded_request.json # Chat 实际转发请求；训练集使用这个输入
         response.body          # 原始响应体；流式时为 SSE（HTTP 内容解码后）
         record.json            # 状态、重组回复、usage、跳过原因等
   datasets/

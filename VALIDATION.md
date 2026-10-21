@@ -1,5 +1,12 @@
 # 验证记录
 
+## v2.1 消息兼容更新（2026-10-21）
+
+本次更新没有新增或运行测试。下面的 38 项结果属于 v2 原有版本，不代表本次修改已通过验证。
+Qwen 消息转换、原始/转发请求导出及 Linux nohup 重启脚本尚未在用户服务器执行验证。
+
+## v2 原有验证记录
+
 - 开发机：Windows，Python 3.14.6；代理代码要求 Python >=3.10，部署方案使用 Linux + Conda Python 3.12。
 - 命令：`python -m pytest -q test_proxy.py test_responses.py`。
 - 结果：38 项测试通过。使用模拟上游，无需 GPU 或访问外部服务。

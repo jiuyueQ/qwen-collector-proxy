@@ -54,6 +54,19 @@ cd /mnt/data/zht/qwen-collector-proxy
 
 ## 后续更新
 
+当前版本的 Qwen 消息兼容、原始请求与转发请求保存规则，以及 **nohup 更新重启命令**见 [CHAT_COMPAT.md](CHAT_COMPAT.md)。已有 nohup 部署可执行：
+
+```bash
+(
+  set -e
+  cd /mnt/data/zht/qwen-collector-proxy
+  git pull --ff-only origin main
+  bash restart_proxy.sh
+)
+```
+
+以下命令用于 systemd 用户服务部署。
+
 已有本地 `collector.env` 和 `data/` 不在仓库内。停止代理后更新代码，再启动：
 
 ```bash

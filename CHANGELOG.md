@@ -1,3 +1,12 @@
+# v2.1
+
+- 新增默认开启的 Qwen Chat system/developer 消息兼容，可通过 CHAT_COMPAT_MODE=off 关闭。
+- 合并开头连续指令；中途指令保留位置并转换为用户上下文，记录来源及语义变化。
+- request.json 保留原始字节，forwarded_request.json 保存实际转发输入，record.json 保存转换审计。
+- 自动 SFT 与离线导出使用实际转发输入，旧记录保持兼容；Responses 历史处理保持原样。
+- 新增 Linux restart_proxy.sh，支持识别本项目旧代理、SIGTERM 停止和 nohup 后台重启。
+- 新增 CHAT_COMPAT.md 更新方案；本次没有新增或运行测试，尚未在用户服务器验证。
+
 # v2
 
 - 新增原生 `/v1/responses` JSON/SSE 转发与事件重组，保留 Chat Completions。
