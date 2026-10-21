@@ -1,4 +1,4 @@
-# Qwen 数字员工采集代理 v2.4：Linux 部署方案
+# Qwen 数字员工采集代理 v2.5：Linux 部署方案
 
 把代理放在数字员工框架与 vLLM 之间。数字员工继续执行工具；代理记录每次模型请求与回复，自动生成候选 SFT 数据。
 
@@ -11,6 +11,8 @@
 Windows 用户可双击 `setup_windows.cmd` 安装、`start_windows.cmd` 启动。已附 1000 组中文自然语言题库（1405 次用户发言），默认单并发、会话隔离、失败停止，使用方法见 [WINDOWS_QUICKSTART.md](WINDOWS_QUICKSTART.md)。
 
 Windows 默认已改为**网页自动操作**：在可见浏览器中逐字输入、点击发送、等待页面回复，每组重新打开页面生成新会话。账号由你在浏览器里手动登录，不使用提问接口直连模式。
+
+**按Agent接口逐会话采集**：双击 `setup_agent_api_windows.cmd` 安装、`start_agent_api_windows.cmd` 运行。每个会话完整结束后再执行下一个，同会话保留多轮记忆。详见 [AGENT_API_WINDOWS.md](AGENT_API_WINDOWS.md)。
 
 ```text
 批量提问脚本 -> 数字员工对话入口

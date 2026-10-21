@@ -393,7 +393,9 @@ async def run(args):
                             for index, question in enumerate(item["turns"], 1):
                                 await auth.refresh()
                                 directory = case_dir / "attempts" / attempt / f"turn-{index:03d}"
+                                print(f"  发送第{index}/{len(item['turns'])}轮，等待Agent完整结束……", flush=True)
                                 turn = await send_turn(args, client, auth, mode, agent_code, question, session_id, directory)
+                                print(f"  第{index}轮结束：{turn['status']}", flush=True)
                                 turn["source"] = directory.relative_to(root).as_posix()
                                 case["results"].append(turn)
                                 case["status"] = turn["status"] if turn["status"] != "success" else "running"
@@ -403,6 +405,8 @@ async def run(args):
                                 if turn["tool_error_detected"] and index < len(item["turns"]):
                                     case["status"] = "stopped_on_tool_error"
                                     break
+                                if index < len(item["turns"]):
+                                    await asyncio.sleep(args.turn_interval)
                             if len(case["results"]) == len(item["turns"]) and all(t["status"] == "success" for t in case["results"]):
                                 case["status"] = "success"
                         except BaseException as exc:
@@ -455,6 +459,7 @@ def main():
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--limit", type=int, default=0, help="本次最多发送多少组题，0 为不限")
     parser.add_argument("--interval", type=float, default=3, help="每组题之间间隔秒数，默认 3")
+    parser.add_argument("--turn-interval", type=float, default=1, help="同会话两轮间隔秒数，默认 1")
     parser.add_argument("--read-timeout", type=float, default=600)
     parser.add_argument("--task-timeout", type=float, default=1800, help="每轮总时间上限秒数")
     parser.add_argument("--max-turns", type=int, default=3, help="每组最大用户轮数，默认 3")
@@ -478,7 +483,7 @@ def main():
         url = urlsplit(value)
         if url.scheme not in {"http", "https"} or not url.netloc or url.username or url.password or url.query or url.fragment:
             parser.error("control-base/gateway-base 必须为不带凭据、query 或 fragment 的 http(s) 地址")
-    if args.repeat < 1 or args.limit < 0 or args.interval < 0 or args.read_timeout <= 0 or args.task_timeout <= 0:
+    if args.repeat < 1 or args.limit < 0 or args.interval < 0 or args.turn_interval < 0 or args.read_timeout <= 0 or args.task_timeout <= 0:
         parser.error("repeat/超时必须大于 0，limit/interval 不能为负数")
     if min(args.max_turns, args.max_question_chars, args.max_agent_output_tokens, args.max_consecutive_failures) <= 0:
         parser.error("轮数、字符、输出令牌与连续失败上限必须大于 0")

@@ -1,6 +1,8 @@
 .conda-env/
 .venv/
 .batch-env/
+.agent-api-env/
+agent_api.local.json
 windows_batch.local.json
 browser_profiles/
 __pycache__/
