@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Interactive Windows entry point. Does not store passwords or login tokens."""
+"""Visible browser automation launcher. Login is completed manually on the webpage."""
 from __future__ import annotations
 
 import argparse
@@ -38,9 +38,9 @@ def main() -> int:
     local = json.loads(local_path.read_text(encoding="utf-8-sig")) if local_path.exists() else {}
     catalog = json.loads((root / "question_banks" / "catalog.json").read_text(encoding="utf-8"))
     print("\nWing 数字员工批量提问 — Windows\n")
-    print("脚本会调用平台的实际 Agent 接口，账号密码与平台登录页相同。")
+    print("脚本会打开浏览器，逐字输入问题、点击发送、等待页面回复。请在浏览器内登录。")
     print("默认：单并发、每组新会话、每组间隔3秒、最多3轮、单轮问题不超过4000字符。")
-    print("可选择保留会话内记忆；平台需按 session/thread 隔离。生成令牌数量保持不高于4096。")
+    print("保留平台的会话内记忆设置；平台需按 session/thread 隔离。生成令牌数量保持不高于4096。")
     page_url = args.page_url or prompt("运行页地址", local.get("page_url", ""))
     if not page_url:
         print("缺少页面地址。")
@@ -70,29 +70,20 @@ def main() -> int:
         return 2
     limit = integer("本次最多执行多少组，0 为全部", 0, 0)
     repeat = integer("每组采样次数", 1, 1)
-    default_output = f"data/batch/windows-{bank_id}-{datetime.now():%Y%m%d}"
+    default_output = f"data/browser/windows-{bank_id}-{datetime.now():%Y%m%d}"
     output = prompt("输出目录；同目录继续运行会跳过已有记录", default_output)
-    print("\n记忆设置：1. 关闭平台记忆，使用严格检查；2. 保留平台的会话内记忆")
-    print("选2时平台必须按 session/thread 分区保存记忆，不使用用户级跨会话共享记忆。")
+    print("\n浏览器：1. 本机 Microsoft Edge；2. 本机 Google Chrome；3. 已安装的 Playwright Chromium")
     while True:
-        memory_mode = integer("记忆模式", 2, 1)
-        if memory_mode in {1, 2}:
+        browser_choice = integer("浏览器编号", 1, 1)
+        if browser_choice in {1, 2, 3}:
             break
-        print("请选择1或2。")
-    tenant_code = prompt("平台租户编码", local.get("tenant_code", ""))
-    username = prompt("平台用户名", local.get("username", ""))
-    if not tenant_code or not username:
-        print("租户编码和用户名不能为空。")
-        return 2
-    # Local convenience settings contain no password/token and are ignored by Git.
-    local_path.write_text(json.dumps({"page_url": page_url, "tenant_code": tenant_code,
-                                     "username": username}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    command = [sys.executable, "-u", str(root / "batch_agent_questions.py"), "--page-url", page_url,
+        print("请选择1、2或3。")
+    browser_channel = {1: "msedge", 2: "chrome", 3: "chromium"}[browser_choice]
+    local_path.write_text(json.dumps({"page_url": page_url}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    command = [sys.executable, "-u", str(root / "batch_browser_questions.py"), "--page-url", page_url,
                "--input", str(questions), "--output", output, "--limit", str(limit),
-               "--repeat", str(repeat), "--login", "--tenant-code", tenant_code, "--username", username]
-    if memory_mode == 2:
-        command.append("--allow-agent-memory")
-    print("\n开始运行。接下来输入平台密码，输入时不显示。Ctrl+C 可中止。", flush=True)
+               "--repeat", str(repeat), "--browser", browser_channel]
+    print("\n准备打开浏览器。登录并进入运行页后，回到控制台按回车开始。Ctrl+C 可中止。", flush=True)
     try:
         return subprocess.call(command, cwd=root)
     except KeyboardInterrupt:

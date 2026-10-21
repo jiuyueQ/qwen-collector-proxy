@@ -2,6 +2,7 @@
 .venv/
 .batch-env/
 windows_batch.local.json
+browser_profiles/
 __pycache__/
 .pytest_cache/
 collector.env
