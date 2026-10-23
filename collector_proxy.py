@@ -18,7 +18,7 @@ import uuid
 from collections import Counter
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -706,11 +706,26 @@ def create_app(settings: Settings, transport: Any = None) -> FastAPI:
     return app
 
 
+def export_date(value: str) -> str:
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("日期必须为 YYYY-MM-DD") from exc
+    if parsed.isoformat() != value:
+        raise argparse.ArgumentTypeError("日期必须为 YYYY-MM-DD")
+    return value
+
+
 def export_dataset(args: argparse.Namespace) -> int:
     data_dir = Path(args.data_dir).resolve()
     output = Path(args.output).resolve()
     if not (data_dir / "raw").is_dir():
         raise ValueError("找不到 data-dir 下的 raw/ 目录，请检查采集数据路径")
+    selected_dates = sorted(set(getattr(args, "dates", None) or []))
+    record_roots = [data_dir / "raw" / day for day in selected_dates]
+    for directory in record_roots:
+        if not directory.is_dir():
+            raise ValueError(f"找不到所选日期的原始记录目录：{directory}")
     if output.exists() and not args.overwrite:
         raise ValueError("输出已存在；请换一个文件名或加 --overwrite")
     if output == data_dir or data_dir / "raw" in output.parents or data_dir / "datasets" in output.parents:
@@ -720,10 +735,15 @@ def export_dataset(args: argparse.Namespace) -> int:
     counts: Counter = Counter()
     seen: set[str] = set()
     history = ResponseHistory(data_dir)
+    # Keep all ancestors available; only selected dates become export targets.
+    # A selected Responses request can reference a creation on an earlier date.
     history.rebuild()
+    record_paths = (sorted(path for directory in record_roots
+                           for path in directory.glob("*/record.json"))
+                    if selected_dates else sorted((data_dir / "raw").glob("*/*/record.json")))
     try:
         with temp.open("w", encoding="utf-8", newline="\n") as handle:
-            for record_path in sorted((data_dir / "raw").glob("*/*/record.json")):
+            for record_path in record_paths:
                 counts["records"] += 1
                 try:
                     record = json.loads(record_path.read_text(encoding="utf-8"))
@@ -768,7 +788,10 @@ def export_dataset(args: argparse.Namespace) -> int:
         os.replace(temp, output)
     finally:
         temp.unlink(missing_ok=True)
-    summary = {"output": str(output), "format": args.format, "counts": dict(counts)}
+    summary = {"output": str(output), "format": args.format, "counts": dict(counts),
+               "selection": {"dates": selected_dates or None,
+                             "date_basis": "raw_directory_request_start_utc",
+                             "history_context": "all_available_dates"}}
     atomic_json(output.with_suffix(output.suffix + ".stats.json"), summary)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0
@@ -791,6 +814,8 @@ def main() -> int:
     export = commands.add_parser("export", help="从原始记录重新导出（默认去重）")
     export.add_argument("--data-dir", required=True)
     export.add_argument("--output", required=True)
+    export.add_argument("--date", dest="dates", action="append", type=export_date,
+                        help="只导出指定UTC日期目录的记录，YYYY-MM-DD；可重复指定，默认全部日期")
     export.add_argument("--format", choices=["prompt-completion", "messages", "responses-native"], default="prompt-completion")
     export.add_argument("--include-reasoning", action="store_true")
     export.add_argument("--keep-duplicates", action="store_true")

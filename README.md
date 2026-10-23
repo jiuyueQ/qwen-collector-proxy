@@ -229,6 +229,21 @@ data/
 
 需要独立推理字段时加 `--include-reasoning`。目标 9B 的 tokenizer/chat template 必须正确处理工具格式；如果模板会忽略独立 reasoning 字段，不能仅靠数据中存在该字段就认为参与训练。`metadata` 用于审计，训练时忽略。先按任务/会话/问题模板划分训练与评测，再处理改写和扩增，避免同一任务的相邻步骤跨集合泄漏。
 
+只重建指定日期的候选数据，可以重复传入 `--date`：
+
+```bash
+./.conda-env/bin/python collector_proxy.py export \
+  --data-dir ./data \
+  --date 2026-10-22 --date 2026-10-23 \
+  --output ./exports/teacher-20261022-23-messages.jsonl \
+  --format messages
+```
+
+日期匹配 `data/raw/YYYY-MM-DD/`，以请求开始的 UTC 日期为准，与自动生成的 `sft-YYYY-MM-DD.jsonl` 使用的日期一致；不是北京时间自然日。
+不传 `--date` 时仍导出全部日期。指定目录不存在时直接报错，避免静默漏导。
+Responses 的 `previous_response_id` 仍可读取其他日期的历史作为上下文，但其他日期的记录不会单独成为本次导出目标。
+统计文件的 `selection` 会记录所选日期和日期依据。更新离线导出脚本无需重启正在运行的采集器。
+
 TRL 的 conversational prompt/completion 与 tools 格式参考：
 - https://huggingface.co/docs/trl/en/dataset_formats
 - https://huggingface.co/docs/trl/en/sft_trainer
